@@ -890,8 +890,12 @@ private class AudioRenderer(
         }
     }
 
+    // API 23 cannot report underruns. Keep normal playback/prebuffering, but disable
+    // counter-triggered rebuffering there instead of treating unavailable data as starvation.
+    private fun AudioTrack.compatUnderrunCount(): Int =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) underrunCount else 0
     private fun startPlayback(track: AudioTrack) {
-        underrunsAtPlaybackStart = track.underrunCount
+        underrunsAtPlaybackStart = track.compatUnderrunCount()
         track.play()
         playbackStarted = true
     }
@@ -899,7 +903,7 @@ private class AudioRenderer(
     private fun maintainPlaybackBuffer() {
         val track = track ?: return
         if (bufferProgress.shouldRebuffer(format.audioType, playbackStarted,
-                track.underrunCount > underrunsAtPlaybackStart, queue.isEmpty(), track.playbackHeadPosition)) {
+                track.compatUnderrunCount() > underrunsAtPlaybackStart, queue.isEmpty(), track.playbackHeadPosition)) {
             // The hardware buffer has actually drained. Pause without flushing or discarding PCM,
             // then use the configured start threshold again when music resumes.
             track.pause()
@@ -919,11 +923,11 @@ private class AudioRenderer(
         val now = System.nanoTime()
         if (statsWindowStartNs == 0L) statsWindowStartNs = now
         if (!force && now - statsWindowStartNs < STATS_WINDOW_NS) return
-        val underruns = track?.underrunCount ?: 0
+        val underruns = track?.compatUnderrunCount() ?: 0
         val lastRx = lastArrivalNs.get()
         val line = "audio stats audioType=${format.audioType} codec=${format.codec} rx=${packetsReceived.getAndSet(0)} " +
             "dropped=${packetsDropped.getAndSet(0)} underruns=+${underruns - statsLastUnderruns} queue=${queue.size} " +
-            "playing=$playbackStarted maxGapMs=${maxArrivalGapMs.getAndSet(0)} " +
+            "underrunStatsAvailable=${Build.VERSION.SDK_INT >= Build.VERSION_CODES.N} playing=$playbackStarted maxGapMs=${maxArrivalGapMs.getAndSet(0)} " +
             "sinceRxMs=${if (lastRx == 0L) -1 else (now - lastRx) / 1_000_000L} maxWriteMs=$maxWriteMs " +
             "decoderDroppedTotal=$inputDropped outputBuffersTotal=$outputBuffers rebuffers=$rebufferCount ended=$force"
         Log.i(STATS_TAG, line)

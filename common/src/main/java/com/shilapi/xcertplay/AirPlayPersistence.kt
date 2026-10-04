@@ -14,6 +14,7 @@ import com.shilapi.xcertplay.orchestration.ManualHotspotBand
 import com.shilapi.xcertplay.orchestration.ManualHotspotSecurity
 import com.shilapi.xcertplay.orchestration.MfiTarget
 import com.shilapi.xcertplay.orchestration.WirelessHotspotMode
+import com.shilapi.xcertplay.orchestration.WirelessModeSupport
 import com.shilapi.xcertplay.transport.LockdownPairRecord
 import java.io.File
 
@@ -189,7 +190,11 @@ object AirPlayPersistence {
         // hotspot/P2P modes drop the iPhone's inbound IPv6 to :7000 in the kernel. Default to it.
         val mode = WirelessHotspotMode.entries.firstOrNull { it.name == stored }
             ?: WirelessHotspotMode.EXTERNAL_WIFI
-        return if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
+        // Android 6 has no LocalOnlyHotspot to stand in for Wi-Fi Direct, so a stored self-hosted
+        // mode stays the legacy Wi-Fi Direct group there.
+        return if (WirelessModeSupport.selfHostedIsExperimental(Build.VERSION.SDK_INT)) {
+            WirelessModeSupport.effectiveMode(mode, Build.VERSION.SDK_INT)
+        } else if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
             mode == WirelessHotspotMode.WIFI_P2P
         ) {
             WirelessHotspotMode.LOCAL_ONLY_HOTSPOT
@@ -531,8 +536,19 @@ object AirPlayPersistence {
             .apply()
     }
 
-    fun loadLockdownRecord(context: Context): LockdownPairRecord? {
-        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    @Synchronized fun loadLockdownRecord(context: Context, deviceKey: String? = null): LockdownPairRecord? {
+        if (deviceKey != null) {
+            require(deviceKey.matches(Regex("[0-9a-f]{64}")))
+            // Archive the legacy slot under its own identity, never under the new phone's key.
+            val legacy = loadLockdownRecord(context)
+            if (legacy != null) {
+                val legacyKey = com.shilapi.xcertplay.transport.LockdownDeviceIdentity.key(legacy.devicePublicKeyPem)
+                val target = context.getSharedPreferences("lockdown_$legacyKey", Context.MODE_PRIVATE)
+                if (!target.contains(KEY_LOCKDOWN_HOST_ID)) saveLockdownRecord(context, legacy)
+                clearLockdownRecord(context)
+            }
+        }
+        val prefs = context.getSharedPreferences(deviceKey?.let { "lockdown_$it" } ?: PREFS, Context.MODE_PRIVATE)
         val hostId = prefs.getString(KEY_LOCKDOWN_HOST_ID, null) ?: return null
         val systemBuid = prefs.getString(KEY_LOCKDOWN_SYSTEM_BUID, null) ?: return null
         val wifiMac = prefs.getString(KEY_LOCKDOWN_WIFI_MAC, null) ?: return null
@@ -559,8 +575,9 @@ object AirPlayPersistence {
         }
     }
 
-    fun saveLockdownRecord(context: Context, record: LockdownPairRecord) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+    @Synchronized fun saveLockdownRecord(context: Context, record: LockdownPairRecord) {
+        val key = com.shilapi.xcertplay.transport.LockdownDeviceIdentity.key(record.devicePublicKeyPem)
+        val saved = context.getSharedPreferences("lockdown_$key", Context.MODE_PRIVATE).edit()
             .putString(KEY_LOCKDOWN_HOST_ID, record.hostId)
             .putString(KEY_LOCKDOWN_SYSTEM_BUID, record.systemBuid)
             .putString(KEY_LOCKDOWN_WIFI_MAC, record.wifiMacAddress)
@@ -570,11 +587,13 @@ object AirPlayPersistence {
             .putString(KEY_LOCKDOWN_HOST_CERT, record.hostCertificatePem.toHex())
             .putString(KEY_LOCKDOWN_ROOT_PRIVATE, record.rootPrivateKeyPem.toHex())
             .putString(KEY_LOCKDOWN_ROOT_CERT, record.rootCertificatePem.toHex())
-            .apply()
+            .commit()
+        check(saved) { "Could not persist the phone pairing record" }
     }
 
-    fun clearLockdownRecord(context: Context) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+    @Synchronized fun clearLockdownRecord(context: Context, deviceKey: String? = null) {
+        require(deviceKey == null || deviceKey.matches(Regex("[0-9a-f]{64}")))
+        context.getSharedPreferences(deviceKey?.let { "lockdown_$it" } ?: PREFS, Context.MODE_PRIVATE).edit()
             .remove(KEY_LOCKDOWN_HOST_ID)
             .remove(KEY_LOCKDOWN_SYSTEM_BUID)
             .remove(KEY_LOCKDOWN_WIFI_MAC)

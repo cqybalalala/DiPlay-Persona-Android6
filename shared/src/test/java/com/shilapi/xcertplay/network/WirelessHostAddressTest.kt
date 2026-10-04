@@ -24,5 +24,15 @@ class WirelessHostAddressTest {
         assertNull(wirelessHostAddress(listOf(ip("0.0.0.0"), ip("127.0.0.1"), ip("224.0.0.251")), 7))
     }
 
+    @Test fun externalWifiRebuildsAMissingScopeAndNeverFallsBackToIpv4() {
+        val unscoped = ip("fe80::1234") as Inet6Address
+        assertEquals(0, unscoped.scopeId)
+        val scoped = scopedLinkLocal(listOf(ip("192.168.1.20"), unscoped), 5)
+        assertEquals(5, scoped?.scopeId)
+        assertArrayEquals(unscoped.address, scoped?.address)
+        assertNull(scopedLinkLocal(listOf(ip("192.168.1.20"), ip("2001:db8::1")), 5))
+        assertNull(scopedLinkLocal(listOf(unscoped), 0))
+    }
+
     private fun ip(value: String) = InetAddress.getByName(value)
 }

@@ -38,6 +38,9 @@ class ExternalWifiManager(
     @Volatile
     private var closed = false
 
+    /** Why the last [readStationState] poll was not usable; reported when [start] times out. */
+    private var lastReason = ""
+
     init {
         require('\u0000' !in expectedSsid) { "ssid must not contain U+0000" }
         require('\u0000' !in passphrase) { "passphrase must not contain U+0000" }
@@ -53,7 +56,7 @@ class ExternalWifiManager(
         }
         require(timeoutMillis > 0) { "timeoutMillis must be positive" }
         val deadline = System.nanoTime() + timeoutMillis * 1_000_000
-        var lastReason = "Wi-Fi station was not connected"
+        lastReason = "Wi-Fi station was not connected"
         while (true) {
             check(!closed) { "ExternalWifiManager is closed" }
             val live = readStationState()
@@ -61,6 +64,7 @@ class ExternalWifiManager(
                 return live
             }
             if (System.nanoTime() >= deadline) {
+                onDiagnostic("External Wi-Fi not usable reason=$lastReason")
                 throw IOException(
                     "外部 Wi-Fi 未连接：请先在车机设置中把车机连接到外部 Wi-Fi（$lastReason）",
                 )
@@ -72,9 +76,14 @@ class ExternalWifiManager(
     /** Reads the live station connection, or null with [lastReason] updated when not usable. */
     @SuppressLint("MissingPermission")
     private fun readStationState(): WirelessHotspotInfo? {
+        if (runCatching { wifiManager.isWifiEnabled }.getOrNull() == false) {
+            lastReason = "车机 Wi-Fi 已关闭"
+            return null
+        }
         val info = runCatching { wifiManager.connectionInfo }.getOrNull()
         val rawSsid = info?.ssid?.removePrefix("\"")?.removeSuffix("\"").orEmpty()
         if (info == null || rawSsid.isEmpty() || rawSsid == "<unknown ssid>") {
+            lastReason = "车机尚未连接到任何 Wi-Fi 网络"
             return null
         }
         if (expectedSsid.isNotBlank() && rawSsid != expectedSsid) {
@@ -88,13 +97,16 @@ class ExternalWifiManager(
         val ipAddressInt = runCatching { info.ipAddress }.getOrNull() ?: 0
         val iface = findInterfaceByIp(ipAddressInt) ?: NetworkInterface.getByName("wlan0")
         if (iface == null) {
+            lastReason = "找不到车机的 Wi-Fi 网络接口"
             return null
         }
         val addresses = Collections.list(iface.inetAddresses)
         val v4 = addresses.filterIsInstance<Inet4Address>().firstOrNull { !it.isLoopbackAddress }
-        val linkLocal = addresses.filterIsInstance<Inet6Address>()
-            .firstOrNull { it.isLinkLocalAddress && it.scopeId != 0 }
+        // Android 6 may list the link-local without a scope id; rebuild it from the interface.
+        val linkLocal = scopedLinkLocal(addresses, iface.index)
         if (linkLocal == null) {
+            lastReason = "接口 ${iface.name} 没有 IPv6 link-local 地址" +
+                "（IPv4=${if (v4 != null) "有" else "无"}）；该车机系统可能关闭了 Wi-Fi 的 IPv6"
             return null
         }
         val security = if (passphrase.isEmpty()) {

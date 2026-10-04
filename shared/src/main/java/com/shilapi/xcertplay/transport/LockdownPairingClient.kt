@@ -15,6 +15,21 @@ import java.security.GeneralSecurityException
 class LockdownPairingClient(
     private val host: Iap2UsbMuxHost,
 ) {
+    /** Reads the currently attached phone, without trusting a cached record. */
+    fun deviceKey(label: String, isCancelled: () -> Boolean): String {
+        val deadline = Deadline(MAXIMUM_STEP_TIMEOUT_MILLIS)
+        checkCancelled(isCancelled)
+        return LockdownPlistChannel(host.connect(
+            destinationPort = Iap2UsbMuxHost.LOCKDOWN_PORT,
+            timeoutMillis = stepTimeoutMillis(deadline),
+        )).use { channel ->
+            val value = getValue(channel, label, "DevicePublicKey", deadline, isCancelled)
+                as? LockdownPlistValue.Data
+                ?: throw LockdownPairingException.InvalidResponse("DevicePublicKey was not data")
+            LockdownDeviceIdentity.key(value.bytes)
+        }
+    }
+
     /**
      * Fetches the two pairing inputs, generates the local record, and sends plaintext Pair.
      *

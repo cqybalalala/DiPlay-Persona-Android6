@@ -69,11 +69,8 @@ class WifiP2pGroupManager(
     private var startAttempt: StartAttempt? = null
 
     override fun start(timeoutMillis: Long): WirelessHotspotInfo {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
-            throw IOException("Wi-Fi P2P requires Android 7 (API 24) or newer")
-        }
         // Android 10 (API 29) added explicit group credentials and the group operating frequency.
-        // Android 7 through 9 only expose the original createGroup overload: the platform chooses
+        // Android 6 through 9 only expose the original createGroup overload: the platform chooses
         // the SSID, passphrase and channel, and awaitUsableGroup reads them back. The platform also
         // never reports the group channel there, so the endpoint advertises channel 0 (unknown)
         // and the iPhone discovers the AP by scanning.
@@ -618,7 +615,10 @@ class WifiP2pGroupManager(
                 AppOpsManager.OPSTR_FINE_LOCATION, android.os.Process.myUid(), appContext.packageName)
         }.getOrNull() else null
         diagnostic("Wi-Fi P2P preflight wifiEnabled=$wifiEnabled locationEnabled=$locationEnabled permissionGranted=$granted locationAccessMode=${locationAccessMode ?: "unknown"} stationMHz=${station.alignmentFrequency ?: "unknown"} stationState=${station.state ?: "unknown"} reportedStationMHz=${station.reportedFrequency ?: "unknown"} fiveGhzSupported=${fiveGhzSupported ?: "unknown"}")
-        if (!granted) throw IOException(if (Build.VERSION.SDK_INT >= 33)
+        // Android 6's createGroup only needs the install-time Wi-Fi state permissions, and its
+        // firmware may have no runtime-permission dialog to grant location with.
+        val permissionRequired = Build.VERSION.SDK_INT >= Build.VERSION_CODES.N
+        if (permissionRequired && !granted) throw IOException(if (Build.VERSION.SDK_INT >= 33)
             "Allow Nearby devices for DiPlay in the head unit's app permissions"
             else "Allow precise Location for DiPlay in the head unit's app permissions")
         if (wifiEnabled == false) throw IOException("Turn on Wi-Fi in the head unit's settings, then reconnect")

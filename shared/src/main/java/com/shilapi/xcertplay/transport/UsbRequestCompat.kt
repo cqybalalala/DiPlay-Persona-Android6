@@ -14,9 +14,9 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 
 /**
- * Android 7 support for the USB request API.
+ * Android 6/7 support for the USB request API.
  *
- * `UsbRequest.queue(ByteBuffer)` and `UsbDeviceConnection.requestWait(long)` are API 26. Android 7
+ * `UsbRequest.queue(ByteBuffer)` and `UsbDeviceConnection.requestWait(long)` are API 26. Android 6/7
  * only exposes `queue(ByteBuffer, int)` and the blocking `requestWait()`, so the timeout is
  * emulated on a dedicated worker. Cancelling the queued request still wakes the blocked platform
  * call, which is what the drain path relies on.

@@ -6,8 +6,8 @@ android {
     compileSdk = 37
 
     defaultConfig {
-        // Android 7.0 (API 24). The previous floor was 28; see docs/BUILD.md.
-        minSdk = 24
+        // Android 6.0 (API 23) wired prototype.
+        minSdk = 23
         targetSdk = 37
 
         ndk {
@@ -16,7 +16,7 @@ android {
 
         externalNativeBuild {
             ndkBuild {
-                arguments 'APP_PLATFORM=android-24'
+                arguments 'APP_PLATFORM=android-23'
             }
         }
 

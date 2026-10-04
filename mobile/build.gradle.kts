@@ -1,3 +1,5 @@
+import java.io.File
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -11,6 +13,8 @@ val localAuthenticationAssets = providers.environmentVariable("DIPLAY_AUTH_ASSET
 // exported diagnostic report can be traced back to one exact build.
 val buildNumber = providers.environmentVariable("DIPLAY_BUILD_NUMBER").orNull
 
+val personaSideBySide = providers.environmentVariable("DIPLAY_PERSONA_SIDE_BY_SIDE").orNull == "1"
+
 android {
     namespace = "com.shilapi.xcertplay"
     compileSdk {
@@ -18,8 +22,9 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.shihab.diplay"
-        minSdk = 24
+        applicationId = if (personaSideBySide) "com.shihab.diplay.persona" else "com.shihab.diplay"
+        manifestPlaceholders["diplayLabel"] = if (personaSideBySide) "DiPlay USB" else "@string/app_name"
+        minSdk = 23
         targetSdk = 37
         versionCode = 20
         versionName = buildNumber?.let { "2.0（$it）" } ?: "2.0"
@@ -27,7 +32,9 @@ android {
     }
 
 
-    localAuthenticationAssets?.let { sourceSets.getByName("main").assets.srcDir(it) }
+    localAuthenticationAssets?.let { dir ->
+        sourceSets.getByName("main").assets.directories.add(dir.absolutePath)
+    }
 
     signingConfigs {
         create("release") {
@@ -85,26 +92,64 @@ dependencies {
 }
 
 // No implicit import. Only the two explicitly selected local runtime assets are allowed.
-val credentialAssets = files(android.sourceSets.flatMap { source ->
-    source.assets.directories.map { directory ->
-        fileTree(directory) {
-            include("**/offline-mfi/**", "**/*.pk8", "**/*.p7b", "**/*.key",
-                "**/*.pem", "**/*.p12", "**/*.pfx", "**/*.jks", "**/*.keystore")
-        }
-    }
-})
+//
+// Scanning strategy (Gradle 9.x / configuration-cache safe):
+//   • localAuthenticationAssets is captured as a String? (serializable) rather than
+//     as a File? Gradle-script reference, which the configuration cache cannot serialize.
+//   • Only the module's own static src/main/assets is scanned for rogue credential
+//     containers.  The external auth-assets dir is verified by existence check only so
+//     that we never hand Gradle a fileTree rooted at D:\ (which covers build outputs).
+val authAssetsDirPath: String? = localAuthenticationAssets?.canonicalPath
+val ownAssetsDirPath: String = projectDir.resolve("src/main/assets").canonicalPath
 val rejectBundledCredentials by tasks.registering {
     group = "verification"
     description = "Reject unexpected credential files in APK assets."
-    val filesToCheck = credentialAssets
-    val allowed = localAuthenticationAssets?.let { dir ->
-        listOf("identity.pk8", "certificate.p7b").map { dir.resolve("offline-mfi/$it").canonicalFile }.toSet()
-    } ?: emptySet()
-    inputs.files(filesToCheck)
+    // Always run: no tracked inputs, so the task is never UP-TO-DATE.
+    outputs.upToDateWhen { false }
+    mustRunAfter(
+        ":common:mergeDebugAssets", ":common:mergeReleaseAssets",
+        ":common:processDebugNavigationResources", ":common:processReleaseNavigationResources",
+        ":shared:mergeDebugAssets", ":shared:mergeReleaseAssets",
+        ":shared:processDebugNavigationResources", ":shared:processReleaseNavigationResources",
+    )
     doLast {
-        check(allowed.all { it.isFile }) { "Explicit local authentication assets are incomplete" }
-        val unexpected = filesToCheck.files.filter { it.canonicalFile !in allowed }
-        check(unexpected.isEmpty()) { "Unexpected credential files in APK assets" }
+        // 1. Verify the two explicitly allowed auth files are present and readable.
+        val authDir: File? = authAssetsDirPath?.let { p: String -> File(p) }
+        if (authDir != null) {
+            val paths = listOf("offline-mfi/identity.pk8", "offline-mfi/certificate.p7b")
+            val missing: List<File> = paths
+                .map { rel: String -> authDir.resolve(rel) }
+                .filter { f: File -> !f.isFile }
+            check(missing.isEmpty()) {
+                "Explicit local authentication assets are incomplete: missing ${
+                    missing.map { f: File -> f.name }}"
+            }
+        }
+        // 2. Scan only the module's own static source assets dir for unexpected
+        //    credential containers.  Use pure stdlib walkTopDown() to avoid
+        //    capturing a Gradle script/project reference (config-cache incompatible).
+        val ownDir: File = File(ownAssetsDirPath)
+        if (ownDir.exists()) {
+            val credExts = setOf("pk8", "p7b", "key", "pem", "p12", "pfx", "jks", "keystore")
+            val allowed: Set<File> = if (authDir != null) {
+                listOf("offline-mfi/identity.pk8", "offline-mfi/certificate.p7b")
+                    .map { rel: String -> authDir.resolve(rel).canonicalFile }
+                    .toSet()
+            } else emptySet()
+            val sep = File.separatorChar
+            val unexpected: List<File> = ownDir.walkTopDown()
+                .filter { f: File ->
+                    f.isFile && (
+                        f.extension.lowercase() in credExts ||
+                        f.canonicalPath.contains("${sep}offline-mfi${sep}") ||
+                        f.canonicalPath.endsWith("${sep}offline-mfi")
+                    ) && f.canonicalFile !in allowed
+                }
+                .toList()
+            check(unexpected.isEmpty()) {
+                "Unexpected credential files in APK assets: $unexpected"
+            }
+        }
     }
 }
 tasks.named("preBuild") { dependsOn(rejectBundledCredentials) }

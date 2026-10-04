@@ -72,7 +72,7 @@ class DiPlayActivity : ComponentActivity() {
             hide(WindowInsetsCompat.Type.statusBars())
         }
         setupError = runCatching { DiPlayBootstrap.ensure(this) }.exceptionOrNull()?.let {
-            "本地初始化未完成。请重新安装完整的 DiPlay 测试版 APK 后重试。"
+            "认证资料缺失、无效或无法读取，当前无法连接 CarPlay。无认证源码包仅供界面兼容性测试；重装同一 APK 不会补齐认证资料。"
         }
         page = savedInstanceState?.getString("page") ?: intent.getStringExtra("page") ?: "home"
         render()
@@ -289,7 +289,14 @@ class DiPlayActivity : ComponentActivity() {
     private fun wirelessLinkControls(parent: LinearLayout) {
         val mode = AirPlayPersistence.loadWirelessHotspotMode(this)
         val carHotspot = mode == WirelessHotspotMode.MANUAL || mode == WirelessHotspotMode.EXTERNAL_WIFI
-        val options = arrayOf("Wi-Fi Direct · 默认", "车机热点", "外部 Wi-Fi · 车机与手机同一网络")
+        // Android 6 only has the original createGroup call, which is unverified on a head unit.
+        val experimental = com.shilapi.xcertplay.orchestration.WirelessModeSupport
+            .selfHostedIsExperimental(Build.VERSION.SDK_INT)
+        val options = arrayOf(
+            if (experimental) "Wi-Fi Direct · 实验性（Android 6 未验证）" else "Wi-Fi Direct · 默认",
+            "车机热点",
+            "外部 Wi-Fi · 车机与手机同一网络",
+        )
         val currentIndex = when (mode) {
             WirelessHotspotMode.MANUAL -> 1
             WirelessHotspotMode.EXTERNAL_WIFI -> 2

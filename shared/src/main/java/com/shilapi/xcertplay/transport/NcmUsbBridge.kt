@@ -301,7 +301,8 @@ class NcmUsbBridge internal constructor(
             ((source[offset + 3].toInt() and 0xff) shl 24)
 
     companion object {
-        private const val READ_CHUNK_BYTES = 32 * 1024
+        // NTBs may span reads; stay within the pre-Android 9 USB request limit.
+        private const val READ_CHUNK_BYTES = 16 * 1024
         private const val USB_PACKET_SIZE = 512
         private const val STATUS_POLL_TIMEOUT_MILLIS = 20
         private const val STATUS_POLL_INTERVAL_MILLIS = 500L

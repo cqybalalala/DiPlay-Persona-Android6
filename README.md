@@ -1,5 +1,19 @@
 # DiPlay
 
+> **Persona Android 6 experimental source branch (`android6-wireless`).** This branch
+> targets the 2019 Proton Persona factory head unit running Android 6.0.1 (API 23).
+> Wired CarPlay and music playback were observed on one car; calls, Siri, long-term
+> stability, and wireless CarPlay are not validated. See the
+> [Persona experiment notes](docs/PERSONA-EXPERIMENT.md) before building or testing.
+> This branch distributes source only. It does not include accessory authentication
+> material, signing keys, or a Persona APK. Permission for local testing of supplied
+> authentication material does not establish permission to redistribute it.
+> This is an independent community experiment. It is not affiliated with,
+> authorized by, or endorsed by Proton, and it is not an official Persona product.
+
+The following general DiPlay information describes the upstream public preview;
+its Android version and compatibility claims do not apply to the Persona experiment.
+
 **CarPlay for compatible Android head units.** Wired and wireless, with the familiar DiAuto interface. Independent app: `com.shihab.diplay`.
 
 [Download & website](https://shihabal3amri.github.io/DiPlay/) · [Release](https://github.com/shihabal3amri/DiPlay/releases/tag/v0.2.0) · [Report a problem](https://github.com/shihabal3amri/DiPlay/issues/new/choose)

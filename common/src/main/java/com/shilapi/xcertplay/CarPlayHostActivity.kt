@@ -541,6 +541,11 @@ class CarPlayHostActivity : ComponentActivity() {
             Manifest.permission.ACCESS_COARSE_LOCATION,
             Manifest.permission.ACCESS_FINE_LOCATION,
         )
+        // Nothing Android 6 does on a wireless link is location-gated, and its Bluetooth
+        // permissions are install-time, so there is nothing to ask for. That also keeps wireless
+        // usable on firmware that ships without the runtime-permission dialog.
+        !com.shilapi.xcertplay.orchestration.WirelessModeSupport
+            .needsLegacyLocationPermission(Build.VERSION.SDK_INT) -> emptyList()
         else -> listOf(
             Manifest.permission.ACCESS_COARSE_LOCATION,
             Manifest.permission.ACCESS_FINE_LOCATION,
@@ -2153,12 +2158,16 @@ class CarPlayHostActivity : ComponentActivity() {
             } else if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
                 // LocalOnlyHotspot starts at API 26. Android 7/7.1 fall back to the legacy
                 // Wi-Fi Direct group, where the platform chooses the credentials and channel.
-                add(WirelessHotspotMode.WIFI_P2P to "Wi-Fi P2P")
+                // Android 6 has the same call but it is unverified on a head unit.
+                val experimental = com.shilapi.xcertplay.orchestration.WirelessModeSupport
+                    .selfHostedIsExperimental(Build.VERSION.SDK_INT)
+                add(WirelessHotspotMode.WIFI_P2P to if (experimental) "Wi-Fi P2P（实验性）" else "Wi-Fi P2P")
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 add(WirelessHotspotMode.LOCAL_ONLY_HOTSPOT to "LocalOnlyHotspot")
             }
             add(WirelessHotspotMode.MANUAL to "手动热点")
+            add(WirelessHotspotMode.EXTERNAL_WIFI to "外部 Wi-Fi")
         }
         var selectedId = View.NO_ID
         for ((mode, label) in modes) {
@@ -3028,9 +3037,9 @@ class CarPlayHostActivity : ComponentActivity() {
             listener = createSessionListener(controllerGeneration),
             media = media,
             reportStatus = createStatusReporter(controllerGeneration),
-            loadPairRecord = { AirPlayPersistence.loadLockdownRecord(this) },
+            loadPairRecord = { key -> AirPlayPersistence.loadLockdownRecord(this, key) },
             savePairRecord = { record -> AirPlayPersistence.saveLockdownRecord(this, record) },
-            clearPairRecord = { AirPlayPersistence.clearLockdownRecord(this) },
+            clearPairRecord = { key -> AirPlayPersistence.clearLockdownRecord(this, key) },
             locationProvider = locationProvider,
         )
         controller = next

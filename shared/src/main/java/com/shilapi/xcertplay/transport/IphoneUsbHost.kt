@@ -359,13 +359,14 @@ class Iap2UsbSession internal constructor(
                 throw IphoneUsbException.DeviceUnavailable("Android could not initialize USBMUX read request")
             }
             initialized = true
+            val buffer = ByteBuffer.allocateDirect(USBMUX_READ_CHUNK_BYTES)
+            // Publish and queue together so close() cannot cancel before the request is queued.
             synchronized(stateLock) {
                 checkOpenLocked()
                 pendingRead = request
-            }
-            val buffer = ByteBuffer.allocateDirect(USBMUX_READ_CHUNK_BYTES)
-            if (!usbCompat.queue(request, buffer)) {
-                throw IphoneUsbException.DeviceUnavailable("Android could not queue USBMUX read request")
+                if (!usbCompat.queue(request, buffer)) {
+                    throw IphoneUsbException.DeviceUnavailable("Android could not queue USBMUX read request")
+                }
             }
             val completed = try {
                 usbCompat.requestWait(connection, timeoutMillis)
@@ -439,7 +440,8 @@ class Iap2UsbSession internal constructor(
     }
 
     private companion object {
-        const val USBMUX_READ_CHUNK_BYTES = 65_536
+        // Keep each request within the pre-Android 9 USB limit; USBMUX reassembles reads.
+        const val USBMUX_READ_CHUNK_BYTES = 16 * 1024
         const val CANCEL_DRAIN_TIMEOUT_MILLIS = 1_000L
     }
 }

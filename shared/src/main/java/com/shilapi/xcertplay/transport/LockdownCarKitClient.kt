@@ -57,6 +57,7 @@ class LockdownCarKitClient(
 
         val secureLockdown = LockdownPlistChannel(sessionTls)
         var serviceStream: BlockingDuplexByteStream? = null
+        var transferred = false
         try {
             val response = secureLockdown.request(
                 LockdownPlistValue.Dictionary(
@@ -80,6 +81,7 @@ class LockdownCarKitClient(
                 destinationPort = port.toInt(),
                 timeoutMillis = STEP_TIMEOUT_MILLIS,
             )
+            serviceStream = serviceConnection
             val readyStream = if (enableServiceSsl) {
                 TlsDuplexChannel.open(
                     underlying = serviceConnection,
@@ -91,12 +93,12 @@ class LockdownCarKitClient(
             }
             serviceStream = readyStream
             val ownedStream = CarkitServiceStream(readyStream, secureLockdown)
-            serviceStream = null
+            transferred = true
             return ownedStream
         } finally {
-            if (serviceStream != null) {
+            if (!transferred) {
                 try {
-                    serviceStream.close()
+                    serviceStream?.close()
                 } finally {
                     secureLockdown.close()
                 }
@@ -133,11 +135,17 @@ class LockdownCarKitClient(
                 ?: error.value.toString()
             else -> throw IphoneUsbException.Protocol("$request response Error was not text or integer")
         }
-        throw IphoneUsbException.Protocol("Lockdown $request failed: $code")
+        throw LockdownRemoteError(request, code)
     }
 
     private companion object {
         const val STEP_TIMEOUT_MILLIS = 5_000L
         const val CARKIT_SERVICE = "com.apple.carkit.service"
     }
+}
+
+/** Keep protocol stage/code separate so unrelated TLS or USB errors never erase pairings. */
+class LockdownRemoteError(val request: String, val code: String) : java.io.IOException("Lockdown $request failed: $code") {
+    val invalidPairing: Boolean get() = request == "StartSession" &&
+        code in setOf("InvalidPairRecord", "InvalidHostID")
 }
